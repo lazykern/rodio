@@ -67,6 +67,7 @@ struct Controls {
     to_clear: Mutex<u32>,
     seek: Mutex<Option<SeekOrder>>,
     position: Mutex<Duration>,
+    duration: Mutex<Option<Duration>>,
 }
 
 impl Sink {
@@ -94,6 +95,7 @@ impl Sink {
                 to_clear: Mutex::new(0),
                 seek: Mutex::new(None),
                 position: Mutex::new(Duration::ZERO),
+                duration: Mutex::new(None),
             }),
             sound_count: Arc::new(AtomicUsize::new(0)),
             detached: false,
@@ -135,6 +137,7 @@ impl Sink {
                 if controls.stopped.load(Ordering::SeqCst) {
                     src.stop();
                     *controls.position.lock().unwrap() = Duration::ZERO;
+                    *controls.duration.lock().unwrap() = None;
                 }
                 {
                     let mut to_clear = controls.to_clear.lock().unwrap();
@@ -142,6 +145,7 @@ impl Sink {
                         src.inner_mut().skip();
                         *to_clear -= 1;
                         *controls.position.lock().unwrap() = Duration::ZERO;
+                        *controls.duration.lock().unwrap() = None;
                     } else {
                         *controls.position.lock().unwrap() = src.inner().inner().inner().inner().get_pos();
                     }
@@ -158,6 +162,7 @@ impl Sink {
                     seek.attempt(amp)
                 }
                 start_played.store(true, Ordering::SeqCst);
+                *controls.duration.lock().unwrap() = src.total_duration();
             })
             .convert_samples();
         self.sound_count.fetch_add(1, Ordering::Relaxed);
@@ -334,6 +339,12 @@ impl Sink {
         self.controls.stopped.store(true, Ordering::SeqCst);
     }
 
+    /// Returns true if this sink has been stopped.
+    #[inline]
+    pub fn is_stopped(&self) -> bool {
+        self.controls.stopped.load(Ordering::SeqCst)
+    }
+
     /// Destroys the sink without stopping the sounds that are still playing.
     #[inline]
     pub fn detach(mut self) {
@@ -371,6 +382,12 @@ impl Sink {
     #[inline]
     pub fn get_pos(&self) -> Duration {
         *self.controls.position.lock().unwrap()
+    }
+
+    /// Returns the duration of the current source.
+    #[inline]
+    pub fn get_duration(&self) -> Option<Duration> {
+        *self.controls.duration.lock().unwrap()
     }
 
     // Add method to set callback
