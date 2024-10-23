@@ -294,6 +294,13 @@ impl Sink {
         self.pause();
     }
 
+    /// Removes all queued sources after the current one.
+    #[inline]
+    pub fn clear_next(&self) {
+        self.queue_tx.clear();
+        self.sound_count.store(1, Ordering::SeqCst);
+    }
+
     /// Skips to the next `Source` in the `Sink`
     ///
     /// If there are more `Source`s appended to the `Sink` at the time,
