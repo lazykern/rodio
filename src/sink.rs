@@ -24,6 +24,8 @@ pub struct Sink {
     sound_count: Arc<AtomicUsize>,
 
     detached: bool,
+    
+    on_source_done: Arc<Mutex<Option<Box<dyn Fn() + Send + 'static>>>>,
 }
 
 struct SeekOrder {
@@ -95,6 +97,7 @@ impl Sink {
             }),
             sound_count: Arc::new(AtomicUsize::new(0)),
             detached: false,
+            on_source_done: Arc::new(Mutex::new(None)),
         };
         (sink, queue_rx)
     }
@@ -159,6 +162,15 @@ impl Sink {
             .convert_samples();
         self.sound_count.fetch_add(1, Ordering::Relaxed);
         let source = Done::new(source, self.sound_count.clone());
+        
+        // Set the callback before appending
+        let on_source_done = self.on_source_done.clone();
+        source.set_on_done(move || {
+            if let Some(callback) = &*on_source_done.lock().unwrap() {
+                callback();
+            }
+        });
+        
         *self.sleep_until_end.lock().unwrap() = Some(self.queue_tx.append_with_signal(source));
     }
 
@@ -298,7 +310,9 @@ impl Sink {
     #[inline]
     pub fn clear_next(&self) {
         self.queue_tx.clear();
-        self.sound_count.store(1, Ordering::SeqCst);
+        if self.sound_count.load(Ordering::SeqCst) > 0 {
+            self.sound_count.store(1, Ordering::SeqCst);
+        }
     }
 
     /// Skips to the next `Source` in the `Sink`
@@ -357,6 +371,15 @@ impl Sink {
     #[inline]
     pub fn get_pos(&self) -> Duration {
         *self.controls.position.lock().unwrap()
+    }
+
+    // Add method to set callback
+    #[inline]
+    pub fn set_on_source_done<F>(&self, callback: F)
+    where
+        F: Fn() + Send + 'static,
+    {
+        *self.on_source_done.lock().unwrap() = Some(Box::new(callback));
     }
 }
 
